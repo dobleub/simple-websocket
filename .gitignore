@@ -1,0 +1,7 @@
+#Ignore this directories
+log/*
+node_modules/*
+
+#Ignore this files types
+*.log
+.htaccess

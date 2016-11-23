@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+
+/**
+ * Simple node daemon, this work with Upstart
+ * 1. Start in the background
+ * 2. Spawn multiple worker for HTTP[S]
+ * 3. Restart the workers on SIGHUP
+ * 4. Terminate the worker on SIGTERM
+ * 5. Drop worker's privileges after HTTP[S] server get started
+ */
+
+// everything above this line will be executed twice
+require('daemon')();
+
+var cluster = require('cluster');
+
+// number of CPU's
+var nCpus = require('os').cpus().length;
+
+/**
+ * creates a new worker when running as cluster master
+ * run the HTTP[S] server otherwise
+ */
+function createWorker(){
+	if(cluster.isMaster){
+		// fork worker if running as cluster master
+		var child = cluster.fork();
+		// respawn the child process after exit
+		// in case of an uncaught exception
+		child.on('exit', function(code, signal){
+			createWorker();
+		});
+	}else{
+		require('../index');
+	}
+}
+
+/**
+ * creates the specified number of workers
+ * @param {number} n, number of workers to create
+ */
+function createWorkers(n){
+	while(n-- > 0){
+		createWorker();
+	}
+}
+
+/**
+ * kills all workers with the given signal
+ * also removes all event listeners from workers before sending the signal to prevent respawing
+ * @param {number} signal
+ */
+function killAllWorkers(signal){
+	var uniqueID, worker;
+	//
+	for(uniqueID in cluster.workers){
+		if(cluster.workers.hasOwnProperty(uniqueID)){
+			worker = cluster.workers[uniqueID];
+			worker.removeAllListeners();
+			worker.process.kill(signal);
+		}
+	}
+}
+
+/**
+ * restarts the workers
+ */
+process.on('SIGHUP', function(){
+	killAllWorkers('SIGTERM');
+	createWorkers(nCpus * 2);
+});
+
+/**
+ * Shuts down the workers
+ */
+process.on('SIGTERM', function(){
+	killAllWorkers('SIGTERM');
+});
+
+// create two children for each CPU
+createWorkers(nCpus * 2);
